@@ -10,164 +10,266 @@ import UIKit
 
 open class ISPageControl: UIControl {
 
-    private let maxVisibleDots = 7
+    private let limit = 5
+    private let visibleLimit = 7
+
+    private var fullScaleIndex = [0, 1, 2]
     private var dotLayers: [CALayer] = []
 
-    // MARK: - Public properties
-
-    open var numberOfPages: Int = 0 {
-        didSet {
-            rebuildDots()
-        }
-    }
-
-    open var currentPage: Int = 0 {
-        didSet {
-            updateDots()
-        }
-    }
-
-    open var radius: CGFloat = 4 {
-        didSet { setNeedsLayout() }
-    }
-
-    open var padding: CGFloat = 8 {
-        didSet { setNeedsLayout() }
-    }
-
-    open var inactiveTintColor: UIColor = .lightGray
-    open var currentPageTintColor: UIColor = .systemBlue
-
-    open var minScale: CGFloat = 0.4
-    open var midScale: CGFloat = 0.7
-
-    open var inactiveTransparency: CGFloat = 0.4
-    open var hideForSinglePage: Bool = true
-
-    // MARK: - Private
-
     private var diameter: CGFloat { radius * 2 }
+    private var centerIndex: Int { fullScaleIndex[1] }
 
-    // MARK: - Init
+    open var currentPage = 0 {
+        didSet {
+            guard numberOfPages > currentPage else { return }
+            update()
+        }
+    }
 
-    public override init(frame: CGRect) {
+    @IBInspectable open var inactiveTintColor: UIColor = .lightGray {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var currentPageTintColor: UIColor = #colorLiteral(red: 0, green: 0.6276981994, blue: 1, alpha: 1) {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var radius: CGFloat = 5 {
+        didSet { updateDotLayersLayout() }
+    }
+
+    @IBInspectable open var padding: CGFloat = 8 {
+        didSet { updateDotLayersLayout() }
+    }
+
+    @IBInspectable open var minScaleValue: CGFloat = 0.4 {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var middleScaleValue: CGFloat = 0.7 {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var numberOfPages: Int = 0 {
+        didSet {
+            setupDotLayers()
+            isHidden = hideForSinglePage && numberOfPages <= 1
+        }
+    }
+
+    @IBInspectable open var hideForSinglePage: Bool = true {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var inactiveTransparency: CGFloat = 0.4 {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var borderWidth: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
+
+    @IBInspectable open var borderColor: UIColor = .clear {
+        didSet { setNeedsLayout() }
+    }
+
+    required public init?(coder aDecoder: NSCoder) {
+        super.init(coder: aDecoder)
+    }
+
+    required public init(frame: CGRect, numberOfPages: Int) {
         super.init(frame: frame)
+        self.numberOfPages = numberOfPages
+        setupDotLayers()
     }
 
-    required public init?(coder: NSCoder) {
-        super.init(coder: coder)
+    override open var intrinsicContentSize: CGSize {
+        sizeThatFits(.zero)
     }
 
-    // MARK: - Layout
+    override open func sizeThatFits(_ size: CGSize) -> CGSize {
 
-    open override func layoutSubviews() {
-        super.layoutSubviews()
-        layoutDots()
-        updateDots()
-    }
+        let count = min(visibleLimit, numberOfPages)
 
-    open override var intrinsicContentSize: CGSize {
-        let count = min(maxVisibleDots, numberOfPages)
         return CGSize(
-            width: CGFloat(count) * diameter + CGFloat(count - 1) * padding,
+            width: CGFloat(count) * diameter + CGFloat(max(count - 1, 0)) * padding,
             height: diameter
         )
     }
-}
 
-// MARK: - Setup
+    open override func layoutSubviews() {
+        super.layoutSubviews()
+
+        updateDotLayersLayout()
+
+        dotLayers.forEach {
+            if borderWidth > 0 {
+                $0.borderWidth = borderWidth
+                $0.borderColor = borderColor.cgColor
+            }
+        }
+
+        update()
+    }
+}
 
 private extension ISPageControl {
 
-    func rebuildDots() {
+    func setupDotLayers() {
 
         dotLayers.forEach { $0.removeFromSuperlayer() }
         dotLayers.removeAll()
 
-        let count = min(maxVisibleDots, numberOfPages)
-
-        for _ in 0..<count {
-            let dot = CALayer()
-            dot.cornerRadius = radius
-            layer.addSublayer(dot)
-            dotLayers.append(dot)
-        }
-
-        invalidateIntrinsicContentSize()
-        setNeedsLayout()
-    }
-
-    func layoutDots() {
-
-        let count = dotLayers.count
-
-        let totalWidth =
-            CGFloat(count) * diameter +
-            CGFloat(count - 1) * padding
-
-        var x = (bounds.width - totalWidth) / 2
-        let y = (bounds.height - diameter) / 2
-
-        for dot in dotLayers {
-
-            dot.frame = CGRect(
-                x: x,
-                y: y,
-                width: diameter,
-                height: diameter
-            )
-
-            x += diameter + padding
-        }
-    }
-}
-
-// MARK: - Update
-
-private extension ISPageControl {
-
-    func updateDots() {
-
         guard numberOfPages > 0 else { return }
 
-        let visibleCount = dotLayers.count
+        for _ in 0..<numberOfPages {
 
-        let startIndex = max(
-            0,
-            min(
-                currentPage - visibleCount / 2,
-                numberOfPages - visibleCount
-            )
+            let dotLayer = CALayer()
+            layer.addSublayer(dotLayer)
+            dotLayers.append(dotLayer)
+        }
+
+        updateDotLayersLayout()
+
+        setNeedsLayout()
+        invalidateIntrinsicContentSize()
+    }
+
+    func updateDotLayersLayout() {
+
+        guard !dotLayers.isEmpty else { return }
+
+        let visibleCount = min(visibleLimit, numberOfPages)
+        let floatCount = CGFloat(visibleCount)
+
+        let totalWidth =
+            diameter * floatCount +
+            padding * (floatCount - 1)
+
+        let x = (bounds.width - totalWidth) * 0.5
+        let y = (bounds.height - diameter) * 0.5
+
+        var frame = CGRect(x: x, y: y, width: diameter, height: diameter)
+
+        for i in 0..<visibleCount {
+
+            let layer = dotLayers[i]
+
+            layer.cornerRadius = radius
+            layer.frame = frame
+
+            frame.origin.x += diameter + padding
+        }
+
+        if dotLayers.count > visibleCount {
+            for i in visibleCount..<dotLayers.count {
+                dotLayers[i].frame = .zero
+            }
+        }
+    }
+
+    func setupDotLayersPosition() {
+
+        guard dotLayers.count > centerIndex else { return }
+
+        let centerLayer = dotLayers[centerIndex]
+
+        centerLayer.position = CGPoint(
+            x: frame.width / 2,
+            y: frame.height / 2
         )
 
-        for (i, dot) in dotLayers.enumerated() {
+        dotLayers.enumerated()
+            .filter { $0.offset != centerIndex }
+            .forEach {
 
-            let pageIndex = startIndex + i
+                let index = abs($0.offset - centerIndex)
 
-            let isCurrent = pageIndex == currentPage
+                let interval =
+                    $0.offset > centerIndex
+                    ? diameter + padding
+                    : -(diameter + padding)
 
-            dot.backgroundColor = isCurrent
+                $0.element.position = CGPoint(
+                    x: centerLayer.position.x + interval * CGFloat(index),
+                    y: $0.element.position.y
+                )
+            }
+    }
+
+    func setupDotLayersScale() {
+
+        dotLayers.enumerated().forEach {
+
+            guard let first = fullScaleIndex.first,
+                  let last = fullScaleIndex.last
+            else { return }
+
+            var transform = CGAffineTransform.identity
+
+            if !fullScaleIndex.contains($0.offset) {
+
+                var scaleValue: CGFloat = 0
+
+                if abs($0.offset - first) == 1 || abs($0.offset - last) == 1 {
+                    scaleValue = min(middleScaleValue, 1)
+
+                } else if abs($0.offset - first) == 2 || abs($0.offset - last) == 2 {
+                    scaleValue = min(minScaleValue, 1)
+
+                } else {
+                    scaleValue = 0
+                }
+
+                transform = transform.scaledBy(
+                    x: scaleValue,
+                    y: scaleValue
+                )
+            }
+
+            $0.element.setAffineTransform(transform)
+        }
+    }
+
+    func update() {
+
+        guard !dotLayers.isEmpty else { return }
+
+        dotLayers.enumerated().forEach {
+
+            $0.element.backgroundColor =
+                $0.offset == currentPage
                 ? currentPageTintColor.cgColor
                 : inactiveTintColor
                     .withAlphaComponent(inactiveTransparency)
                     .cgColor
-
-            let distance = abs(pageIndex - currentPage)
-
-            let scale: CGFloat
-
-            switch distance {
-            case 0: scale = 1
-            case 1: scale = midScale
-            case 2: scale = minScale
-            default: scale = minScale * 0.7
-            }
-
-            dot.setAffineTransform(
-                CGAffineTransform(scaleX: scale, y: scale)
-            )
         }
 
-        isHidden = hideForSinglePage && numberOfPages <= 1
+        guard numberOfPages > limit else { return }
+
+        changeFullScaleIndexsIfNeeded()
+
+        setupDotLayersPosition()
+        setupDotLayersScale()
+    }
+
+    func changeFullScaleIndexsIfNeeded() {
+
+        guard !fullScaleIndex.contains(currentPage) else { return }
+
+        let moreThanBefore = (fullScaleIndex.last ?? 0) < currentPage
+
+        if moreThanBefore {
+
+            fullScaleIndex[0] = currentPage - 2
+            fullScaleIndex[1] = currentPage - 1
+            fullScaleIndex[2] = currentPage
+
+        } else {
+
+            fullScaleIndex[0] = currentPage
+            fullScaleIndex[1] = currentPage + 1
+            fullScaleIndex[2] = currentPage + 2
+        }
     }
 }
